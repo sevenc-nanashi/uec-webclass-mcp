@@ -244,7 +244,7 @@ class Session {
                 courses.push({
                   weekday: weekdayRow[index],
                   period,
-                  deadlineAlert: hasDeadlineAlert,
+                  hasDeadlineAlert,
                   course: {
                     id,
                     name,
