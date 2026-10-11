@@ -44,12 +44,17 @@ const loginActionUrls = [wcLoginUrl, ssoMfaUrl];
 
 function isSsoStep(url: string, steps: number[]): boolean {
   if (!isTargetUrl(url, ssoUrl)) return false;
-  const match = new URL(url).searchParams.get("execution")?.match(/^e\d+s([124])$/);
+  const match = new URL(url).searchParams
+    .get("execution")
+    ?.match(/^e\d+s([124])$/);
   return match != null && steps.includes(Number(match[1]));
 }
 
 function isLoginActionUrl(url: string): boolean {
-  return loginActionUrls.some((actionUrl) => isTargetUrl(url, actionUrl)) || isSsoStep(url, [2]);
+  return (
+    loginActionUrls.some((actionUrl) => isTargetUrl(url, actionUrl)) ||
+    isSsoStep(url, [2])
+  );
 }
 
 class Session {
@@ -63,11 +68,16 @@ class Session {
     const visitedUrls = new Set<string>();
 
     while (true) {
-      await page.waitForURL((url) => isLoginActionUrl(url.href) || isTargetUrl(url.href, homeUrl), {
-        timeout: 10000,
-      });
+      await page.waitForURL(
+        (url) => isLoginActionUrl(url.href) || isTargetUrl(url.href, homeUrl),
+        {
+          timeout: 10000,
+        },
+      );
       if (visitedUrls.has(page.url())) {
-        throw new Error(`Loop detected in login flow, visited URL: ${page.url()}`);
+        throw new Error(
+          `Loop detected in login flow, visited URL: ${page.url()}`,
+        );
       }
       visitedUrls.add(page.url());
 
@@ -77,7 +87,9 @@ class Session {
         await page.locator("#username").fill(env().UEC_ID);
         await page.locator("#password").fill(env().UEC_PASSWORD);
         await page.locator('input[name="login"]').dispatchEvent("click");
-        await page.waitForURL((url) => url.href !== currentUrl, { timeout: 10000 });
+        await page.waitForURL((url) => url.href !== currentUrl, {
+          timeout: 10000,
+        });
       } else if (isTargetUrl(page.url(), homeUrl)) {
         sessionLogger.info`Login successful!`;
         break;
@@ -98,17 +110,29 @@ class Session {
     }
   }
 
-  async whoami(): Promise<{ name: string; emails: string[] }> {
+  async whoami(): Promise<{
+    name: string;
+    realName: string;
+    emails: string[];
+  }> {
     using _lock = await this.mutex.lock();
 
     sessionLogger.info`Fetching user information...`;
-    await this.openPage("https://webclass.cdel.uec.ac.jp/webclass/user.php/config");
-    const name = await page.locator("#UserIdTitle + div > p.form-control-static").textContent();
+    await this.openPage(
+      "https://webclass.cdel.uec.ac.jp/webclass/user.php/config",
+    );
+    const name = await page
+      .locator("#UserIdTitle + div > p.form-control-static")
+      .textContent();
+    const realName = await page
+      .locator('input[name="realname"]')
+      .getAttribute("value")
+      .then((c) => c ?? "");
     const emails = await page
       .locator('input[name="email"]')
       .getAttribute("value")
       .then((c) => c?.split(",") ?? []);
-    return { name: name ?? "", emails };
+    return { name: name ?? "", realName, emails };
   }
 
   private async openPage(url: string): Promise<void> {
@@ -129,7 +153,9 @@ class Session {
     );
     if (!isTargetUrl(page.url(), url)) {
       if (nest >= 3) {
-        throw new Error(`Failed to open page after multiple login attempts: ${url}`);
+        throw new Error(
+          `Failed to open page after multiple login attempts: ${url}`,
+        );
       }
       sessionLogger.info`Detected login required. Logging in...`;
       await this.login();
@@ -156,19 +182,23 @@ class Session {
     const availableYears = await page
       .locator('select[name="year"] > option')
       .evaluateAll((options) =>
-        options.map((option): TimetableTargetOption => ({
-          name: option.textContent?.trim() ?? "",
-          id: option.getAttribute("value") ?? "",
-        })),
+        options.map(
+          (option): TimetableTargetOption => ({
+            name: option.textContent?.trim() ?? "",
+            id: option.getAttribute("value") ?? "",
+          }),
+        ),
       );
 
     const availableSemesters = await page
       .locator('select[name="semester"] > option')
       .evaluateAll((options) =>
-        options.map((option): TimetableTargetOption => ({
-          name: option.textContent?.trim() ?? "",
-          id: option.getAttribute("value") ?? "",
-        })),
+        options.map(
+          (option): TimetableTargetOption => ({
+            name: option.textContent?.trim() ?? "",
+            id: option.getAttribute("value") ?? "",
+          }),
+        ),
       );
     const currentYear = await page
       .locator('select[name="year"] > option[selected]')
@@ -183,7 +213,9 @@ class Session {
       sessionLogger.warning`No timed courses found.`;
     } else {
       sessionLogger.info`Parsing courses from the timetable...`;
-      const weekdayRow = await page.locator("#schedule-table > thead > tr > th").allTextContents();
+      const weekdayRow = await page
+        .locator("#schedule-table > thead > tr > th")
+        .allTextContents();
       if (weekdayRow.length === 0) {
         throw new Error("Failed to parse weekday row from the timetable.");
       }
@@ -202,12 +234,20 @@ class Session {
                   "https://webclass.cdel.uec.ac.jp/webclass/",
                 ).href;
                 const id = url.match(/course.php\/([^/]+)/)?.[1] ?? "";
+                const name = (
+                  link.childNodes[0]?.textContent?.trim() ?? ""
+                ).replace("» ", "");
+                // NOTE: 名前的に締め切りアラート以外も入りそう...
+                const hasDeadlineAlert = !!cell.querySelector(
+                  ".course-contents-info",
+                );
                 courses.push({
                   weekday: weekdayRow[index],
                   period,
+                  deadlineAlert: hasDeadlineAlert,
                   course: {
                     id,
-                    name: (link.textContent?.trim() ?? "").replace("» ", ""),
+                    name,
                     url,
                   },
                 });
@@ -223,32 +263,39 @@ class Session {
       .locator(".courseTree.courseLevelOne")
       .evaluateAll((items): TimetableUntimedCourses[] =>
         items.map((item) => {
-          const category = item.querySelector(".courseTree-levelTitle")?.textContent?.trim() ?? "";
-          const subCategories = Array.from(item.querySelectorAll(".courseTree.courseLevelTwo")).map(
-            (subItem): TimetableUntimedCourses["courses"][number] => {
-              const subCategory = subItem.querySelector(".title h5")?.textContent?.trim() ?? "";
-              const courses = Array.from(subItem.querySelectorAll(".course-title")).map(
-                (courseItem): TimetableUntimedCourses["courses"][number]["courses"][number] => {
-                  const link = courseItem.querySelector("a");
-                  const url = new URL(
-                    link?.getAttribute("href") ?? "",
-                    "https://webclass.cdel.uec.ac.jp/webclass/",
-                  ).href;
-                  const id = url.match(/course.php\/([^/]+)/)?.[1] ?? "";
-                  return {
-                    id,
-                    name: link?.textContent?.trim() ?? "",
-                    url,
-                  };
-                },
-              );
+          const category =
+            item.querySelector(".courseTree-levelTitle")?.textContent?.trim() ??
+            "";
+          const subCategories = Array.from(
+            item.querySelectorAll(".courseTree.courseLevelTwo"),
+          ).map((subItem): TimetableUntimedCourses["courses"][number] => {
+            const subCategory =
+              subItem.querySelector(".title h5")?.textContent?.trim() ?? "";
+            const courses = Array.from(
+              subItem.querySelectorAll(".course-title"),
+            ).map(
+              (
+                courseItem,
+              ): TimetableUntimedCourses["courses"][number]["courses"][number] => {
+                const link = courseItem.querySelector("a");
+                const url = new URL(
+                  link?.getAttribute("href") ?? "",
+                  "https://webclass.cdel.uec.ac.jp/webclass/",
+                ).href;
+                const id = url.match(/course.php\/([^/]+)/)?.[1] ?? "";
+                return {
+                  id,
+                  name: link?.textContent?.trim() ?? "",
+                  url,
+                };
+              },
+            );
 
-              return {
-                subCategory,
-                courses,
-              };
-            },
-          );
+            return {
+              subCategory,
+              courses,
+            };
+          });
 
           return {
             category,
@@ -271,7 +318,9 @@ class Session {
     using _lock = await this.mutex.lock();
 
     sessionLogger.info`Fetching course information for course ID: ${courseId}...`;
-    await this.openPage(`https://webclass.cdel.uec.ac.jp/webclass/course.php/${courseId}/`);
+    await this.openPage(
+      `https://webclass.cdel.uec.ac.jp/webclass/course.php/${courseId}/`,
+    );
 
     const rawTimeline = await page.evaluate(async (courseId) => {
       return await fetch(
@@ -288,29 +337,38 @@ class Session {
       ),
     });
     const parsedTimeline = v.parse(rawTimelineSchema, rawTimeline);
-    const timeline = parsedTimeline.records.map((record): CourseTimelineEntry => ({
-      content: record.message,
-      author: record.realname,
-      datetime: new Date(record.datetime * 1000).toISOString(),
-    }));
+    const timeline = parsedTimeline.records.map(
+      (record): CourseTimelineEntry => ({
+        content: record.message,
+        author: record.realname,
+        datetime: new Date(record.datetime * 1000).toISOString(),
+      }),
+    );
 
     const sections = await page
       .locator(".cl-contentsList_folder")
       .evaluateAll((folders): CourseSection[] => {
         return folders.map((folder) => {
-          const title = folder.querySelector(".panel-title")?.textContent?.trim() ?? "";
+          const title =
+            folder.querySelector(".panel-title")?.textContent?.trim() ?? "";
           const contents = Array.from(
             folder.querySelectorAll(".cl-contentsList_listGroupItem"),
           ).map((item): CourseContent => {
             const title =
-              item.querySelector(".cm-contentsList_contentName")?.textContent?.trim() ?? "";
+              item
+                .querySelector(".cm-contentsList_contentName")
+                ?.textContent?.trim() ?? "";
             const kind =
-              item.querySelector(".cl-contentsList_categoryLabel")?.textContent?.trim() ?? "";
+              item
+                .querySelector(".cl-contentsList_categoryLabel")
+                ?.textContent?.trim() ?? "";
             let availableDuring: string | undefined = undefined;
             let url: string = "";
             let numUsed: number | undefined = undefined;
 
-            for (const child of item.querySelectorAll(".cm-contentsList_contentDetailListItem")) {
+            for (const child of item.querySelectorAll(
+              ".cm-contentsList_contentDetailListItem",
+            )) {
               const label = child
                 .querySelector(".cm-contentsList_contentDetailListItemLabel")
                 ?.textContent?.trim();
@@ -321,7 +379,9 @@ class Session {
                 availableDuring = data ?? undefined;
               }
             }
-            for (const child of item.querySelectorAll(".cl-contentsList_contentDetailListItem")) {
+            for (const child of item.querySelectorAll(
+              ".cl-contentsList_contentDetailListItem",
+            )) {
               const label = child
                 .querySelector(".cl-contentsList_contentDetailListItemLabel")
                 ?.textContent?.trim();

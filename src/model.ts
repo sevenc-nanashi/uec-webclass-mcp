@@ -8,6 +8,9 @@ export const timetableTimedCourseSchema = v.object({
   weekday: v.string(),
   period: v.string(),
   course: timetableCourseSchema,
+
+  // 「その他のコース」での締め切りアラートがわからないので時間割のコース側に締め切りアラートの情報を持たせる
+  hasDeadlineAlert: v.boolean(),
 });
 export const timetableUntimedCoursesSchema = v.object({
   category: v.string(),
@@ -31,9 +34,15 @@ export const timetableSchema = v.object({
   untimedCourses: v.array(timetableUntimedCoursesSchema),
 });
 export type TimetableCourse = v.InferOutput<typeof timetableCourseSchema>;
-export type TimetableTimedCourse = v.InferOutput<typeof timetableTimedCourseSchema>;
-export type TimetableUntimedCourses = v.InferOutput<typeof timetableUntimedCoursesSchema>;
-export type TimetableTargetOption = v.InferOutput<typeof timetableTargetOptionSchema>;
+export type TimetableTimedCourse = v.InferOutput<
+  typeof timetableTimedCourseSchema
+>;
+export type TimetableUntimedCourses = v.InferOutput<
+  typeof timetableUntimedCoursesSchema
+>;
+export type TimetableTargetOption = v.InferOutput<
+  typeof timetableTargetOptionSchema
+>;
 export type Timetable = v.InferOutput<typeof timetableSchema>;
 
 export const courseContentSchema = v.object({

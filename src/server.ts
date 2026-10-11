@@ -16,6 +16,7 @@ server.registerTool(
       v.union([
         v.object({
           name: v.string(),
+          realName: v.string(),
           emails: v.array(v.string()),
         }),
         v.object({
